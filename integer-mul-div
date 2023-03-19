@@ -1,7 +1,8 @@
 
 #include "p16f84a.inc"	; This includes PIC16F84A definitions for the MPASM assembler
 
-;complete program for addition and subtraction using four-digit display DMK 13 February 2021
+;Program for multiplication and division, but needs some other instructions!
+
 			list 		P=PIC16F84
 			__config 	H'3ff0'
 temp0 		equ 		H'0C'
