@@ -1,0 +1,196 @@
+
+#include "p16f84a.inc"	; This includes PIC16F84A definitions for the MPASM assembler
+
+;complete program for addition and subtraction using four-digit display DMK 13 February 2021
+			list 		P=PIC16F84
+			__config 	H'3ff0'
+temp0 		equ 		H'0C'
+temp1 		equ 		H'0D'
+dig4 		equ 		H'0E'
+dig3 		equ 		H'0F'
+dig2 		equ			H'10'
+dig1 		equ 		H'11'
+counts 		equ 		H'12'
+hold 		equ 		H'13'
+count0 		equ 		H'14'
+count1 		equ 		H'15'
+porta 		equ 		H'05'
+portb 		equ 		H'06'
+status 		equ 		H'03'
+trisa 		equ 		H'05'
+trisb 		equ 		H'06'
+op_0 		equ 		H'16'
+op_1 		equ 		H'17'
+divisor 	equ 		H'18'
+remain 		equ 		H'19'
+quot_0 		equ 		H'1A'
+quot_1 		equ 		H'1B'
+mult0 		equ 		H'1C'
+mult1 		equ 		H'1D'
+			org 		H'0'
+			goto 		start
+			
+			
+;This subroutine delays 1 second with a 32,768 Hz oscillator.
+del1 		movlw 		H'0E'
+			movwf 		count0
+outer1 		movlw 		H'C3'
+			movwf 		count1
+inner1 		decfsz 		count1,1
+			goto 		inner1
+			decfsz 		count0,1
+			goto 		outer1
+			return
+			
+			
+;This subroutine outputs binary-coded decimal values to the four digit display in serial form.
+;The data line on RA0 outputs 16 bits to the external shift register, with the most-significant bit
+;of the left-most digit first.
+;The clock line on RA1 transfers each bit to the shift register on the rising edge.
+;The load line on RA2 transfers the new data from the shift register to the external display latches
+;on its rising edge.
+	
+out 		movlw 		H'08' 		;shift 8 bits for two digits
+			movwf 		temp0
+			swapf 		dig4,0 		;load digit 4 in upper nibble of W
+			addwf 		dig3,0 		;load digit 3 in lower nibble of W
+			movwf 		temp1 		;store result in temp1
+more1 		bsf 		porta,0 	;preset output bit
+			rlf 		temp1,1 	;rotate lsb into carry
+			btfss 		status,0 	;test carry bit
+			bcf 		porta,0 	;clear output bit if data bit is 0--otherwise do nothing
+			bsf 		porta,1
+			bcf 		porta,1 	;pulse clock line to shift data bit into output register
+			decfsz 		temp0,1 	;check for more bits to output
+			goto 		more1 		;continue outputting bits
+			movlw	 	H'08' 		;shift 8 bits for two digits
+			movwf 		temp0
+			swapf 		dig2,0 		;load digit 2 in upper nibble of W
+			addwf 		dig1,0 		;load digit 1 in lower nibble of W
+			movwf 		temp1 		;store result in temp1
+more2 		bsf 		porta,0 	;preset output bit
+			rlf 		temp1,1 	;rotate lsb into carry
+			btfss 		status,0 	;test carry bit
+			bcf			porta,0 	;clear output bit if data bit is 0--otherwise do nothing
+			bsf 		porta,1
+			bcf 		porta,1 	;pulse clock line to shift data bit into output register
+			decfsz 		temp0,1 	;check for more bits to output
+			goto 		more2 		;continue outputting bits
+			bsf 		porta,2
+			bcf 		porta,2 	;pulse load line to transfer output bits from shift register to
+									;display latches
+			return			
+
+;This subroutine divides the 16 bit value in the composite op_1:op_0 register by the 8 bit value in the
+;divisor register. The 16 bit quotient is returned in op_1:op_0 and the 8 bit remainder is returned in remain.
+;All values are unsigned binary.
+div_8 		clrf 		remain
+			clrf 		quot_0
+			clrf 		quot_1
+			movlw 		H'10'
+			movwf 		temp0
+div_loop 	bcf 		status,0 	;clear the carry flag
+			rlf 		op_0,1
+			rlf 		op_1,1
+			rlf 		remain,1 	;shift carry into partial remainder
+			btfss 		status,0
+			goto 		not_special
+			movlw 		H'FF'
+			movwf 		temp1
+			movf 		divisor,0
+			subwf 		temp1,1
+			incf 		temp1,1
+			movf 		temp1,0
+			addwf 		remain,1
+			bsf 		status,0 	;shift 1 into quotient
+			goto 		shftq
+not_special movf 		divisor,0
+			subwf 		remain,0
+			btfss 		status,0
+			goto 		cant_sub
+			movf 		divisor,0
+			subwf 		remain,1
+			bsf 		status,0 	;shift 1 into quotient
+			goto 		shftq
+cant_sub 	bcf 		status,0 	;shift 0 into quotient
+shftq 		rlf 		quot_0,1
+			rlf 		quot_1,1
+			decfsz 		temp0,1
+			goto 		div_loop
+			movf 		quot_0,0
+			movwf 		op_0
+			movf 		quot_1,0
+			movwf 		op_1
+			return
+
+;This subroutine multiplies two 8-bit factors in mult0 and mult1 and returns the 16-bit
+;product in op_1:op_0.
+mul_8 		movlw 		H'8'
+			movwf 		temp0 		;prepare to multiply 8 bits
+			clrf 		op_0 		;zero result initially
+			clrf 		op_1
+			clrf 		temp1
+mul_loop 	rrf 		mult0,1 	;rotate LSB of mult0 into carry flag
+			btfss 		status,0 	;test carry bit
+			goto 		no_add 		;do not add if carry bit is 0
+			movf 		mult1,0
+			addwf 		op_0,1 		;perform 16-bit addition
+			btfss 		status,0
+			goto 		do_msd
+			incf 		op_1,1
+do_msd 		movf 		temp1,0
+			addwf 		op_1,1
+no_add 		bcf 		status,0 	;shift mult1 left
+			rlf 		mult1,1
+			rlf 		temp1,1
+			decfsz 		temp0,1
+			goto 		mul_loop
+			return
+
+;main program for multiplication and division
+;initialization
+start 		clrf 		porta 		;init all port bits to zero
+			clrf 		portb
+			bsf 		status,5
+			movlw 		H'08'
+			movwf 		trisa 		;port A bit 3 an input
+			movlw 		H'FF'
+			movwf 		trisb 		;port B all inputs
+			bcf 		status,5
+			call 		del1 		;delay 1 second to allow ports to settle
+			movlw 		H'8'
+			movwf 		dig1
+			movwf 		dig2
+			call 		out
+			clrf 		dig1
+			clrf 		dig2
+			clrf 		dig3
+			clrf 		dig4
+			call 		out 		;initialize digits 1 and 2 to make them show zeros
+
+;main program loop
+top 		swapf 		portb,0 	;load operand A from lines 7-4 of port B
+			andlw 		H'0F' 		;mask upper nibble
+			movwf 		hold 		;store operand A in hold
+			movf 		portb,0 	;load operand B from lines 3-0 of port B
+			andlw 		H'0F' 		;mask upper nibble; leave B in W
+			btfss 		porta,3 	;check divide switch
+			goto 		divide 		;divide if switch pressed
+
+multiply 							;insert code here for integer multiplication
+
+divide 								;insert code here for integer division with remainder
+									;be sure to blank the remainder (digit 3) when
+									;multiplication results are being displayed
+
+display 	movf 		op_0,0 		;load result into W
+			andlw 		H'0F' 		;mask out upper nibble to getlsd
+			movwf 		dig1 		;display lower nibble of result in digit 1
+			swapf 		op_0,0 		;swap nibbles in result and place in W
+			andlw 		H'0F' 		;mask out upper nibble to get msd
+			movwf 		dig2 		;display upper nibble of result in digit 2
+			call 		out 		;update display with result
+			call 		del1 		;delay 1 second to prevent the loop from running wide open
+			goto 		top 		;loop endlessly
+			end
+      END
